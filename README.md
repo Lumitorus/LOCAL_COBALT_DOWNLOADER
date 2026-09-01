@@ -1,5 +1,7 @@
 # Локальный Cobalt: Docker, Linux и Proxmox LXC
 
+> 🤖 Этот проект создан при помощи ИИ: первоначальная архитектура, Docker-конфигурация, установочные скрипты и документация подготовлены совместно с OpenAI Codex. Результат был проверен реальной сборкой, healthcheck и функциональным API-тестом. Ответственность за публикацию и дальнейшее сопровождение проекта несёт автор репозитория.
+
 Этот комплект разворачивает собственный [Cobalt](https://github.com/imputnet/cobalt):
 
 - локальный web-интерфейс на порту `8080`;
@@ -59,6 +61,34 @@ API запускается из официального образа `ghcr.io/i
 
 На проверке API сообщил версию Cobalt `11.7.1` и commit `a636575b09de1fc55d9b8cd98cac88f5f2f16b42`. Shell-синтаксис обоих `.sh` проверен через `bash -n`. Само создание LXC не запускалось, поскольку для него необходим настоящий Proxmox VE host; параметры `pct` подготовлены под Debian 12 unprivileged LXC.
 
+## Установка одной командой
+
+### Обычный Debian/Ubuntu-сервер
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/main/scripts/install.sh \
+  | sudo bash
+```
+
+После завершения команда напечатает адрес web-интерфейса, API, каталог установки и команды управления.
+
+### Proxmox VE LXC
+
+Команда выполняется в shell **самого Proxmox VE host** от `root`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/main/scripts/proxmox-lxc.sh \
+  | bash
+```
+
+Она загрузит комплект, создаст Debian 12 LXC, установит в него Docker и запустит Cobalt.
+
+> Запуск `curl | bash` удобен, но выполняет актуальный код ветки `main` с правами root. Перед запуском можно [открыть Linux-скрипт](https://github.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/blob/main/scripts/install.sh) или [Proxmox-скрипт](https://github.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/blob/main/scripts/proxmox-lxc.sh) и проверить содержимое. Для воспроизводимой установки используйте URL конкретного commit вместо `main` и передайте такой же `REPO_REF`.
+
+Пока репозиторий приватный, GitHub вернёт `404` для этих raw-ссылок без авторизации. До публикации используйте локальный запуск из клонированного репозитория, описанный ниже.
+
 ## Быстрый запуск через Docker Compose
 
 1. Скопируйте файл окружения:
@@ -99,9 +129,11 @@ docker compose down
 
 ## Автоустановка на Debian/Ubuntu
 
-Скачайте весь этот комплект на сервер, затем:
+Если установка одной командой не нужна, клонируйте репозиторий и запустите локальный скрипт:
 
 ```bash
+git clone https://github.com/Lumitorus/LOCAL_COBALT_DOWNLOADER.git
+cd LOCAL_COBALT_DOWNLOADER
 chmod +x scripts/install.sh
 sudo ./scripts/install.sh
 ```
@@ -142,7 +174,7 @@ sudo ./scripts/proxmox-lxc.sh
 ```bash
 sudo env \
   CTID=250 \
-  HOSTNAME=cobalt \
+  LXC_HOSTNAME=cobalt \
   TEMPLATE_STORAGE=local \
   ROOTFS_STORAGE=local-lvm \
   BRIDGE=vmbr0 \

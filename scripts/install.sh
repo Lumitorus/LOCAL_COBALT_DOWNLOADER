@@ -3,19 +3,46 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-readonly SCRIPT_DIR BUNDLE_DIR
+readonly SCRIPT_DIR
 INSTALL_DIR="${INSTALL_DIR:-/opt/cobalt-local}"
+REPO_REF="${REPO_REF:-main}"
+RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/${REPO_REF}}"
+TEMP_BUNDLE=""
 
 log() { printf '\n[cobalt] %s\n' "$*"; }
 die() { printf '\n[cobalt] ОШИБКА: %s\n' "$*" >&2; exit 1; }
+
+cleanup() {
+    [[ -z ${TEMP_BUNDLE} ]] || rm -rf -- "${TEMP_BUNDLE}"
+}
+trap cleanup EXIT
 
 if [[ ${EUID} -ne 0 ]]; then
     die "запустите скрипт от root: sudo $0"
 fi
 
-for file in compose.yaml Dockerfile.web nginx.conf cookies.example.json .env.example; do
-    [[ -f "${BUNDLE_DIR}/${file}" ]] || die "не найден ${BUNDLE_DIR}/${file}; запускайте скрипт из полного комплекта проекта"
-done
+readonly BUNDLE_FILES=(compose.yaml Dockerfile.web nginx.conf cookies.example.json .env.example)
+
+bundle_is_complete() {
+    local file
+    for file in "${BUNDLE_FILES[@]}"; do
+        [[ -f "${BUNDLE_DIR}/${file}" ]] || return 1
+    done
+}
+
+download_bundle() {
+    command -v curl >/dev/null 2>&1 || die "для загрузки комплекта нужен curl"
+    TEMP_BUNDLE="$(mktemp -d)"
+    BUNDLE_DIR="${TEMP_BUNDLE}"
+    local file
+    log "Локальный комплект не найден; загружаю файлы из ${RAW_BASE}"
+    for file in "${BUNDLE_FILES[@]}"; do
+        curl --proto '=https' --tlsv1.2 -fsSL "${RAW_BASE}/${file}" -o "${BUNDLE_DIR}/${file}" \
+            || die "не удалось скачать ${file}. Репозиторий должен быть публичным, а REPO_REF — существовать"
+    done
+}
+
+bundle_is_complete || download_bundle
 
 install_docker() {
     command -v curl >/dev/null 2>&1 || {
@@ -43,7 +70,7 @@ docker compose version >/dev/null 2>&1 || die "не найден Docker Compose 
 
 log "Копирую конфигурацию в ${INSTALL_DIR}"
 install -d -m 0755 "${INSTALL_DIR}"
-for file in compose.yaml Dockerfile.web nginx.conf cookies.example.json .env.example; do
+for file in "${BUNDLE_FILES[@]}"; do
     install -m 0644 "${BUNDLE_DIR}/${file}" "${INSTALL_DIR}/${file}"
 done
 

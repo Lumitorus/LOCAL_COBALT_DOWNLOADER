@@ -3,10 +3,13 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
-readonly SCRIPT_DIR BUNDLE_DIR
+readonly SCRIPT_DIR
+REPO_REF="${REPO_REF:-main}"
+RAW_BASE="${RAW_BASE:-https://raw.githubusercontent.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/${REPO_REF}}"
+TEMP_BUNDLE=""
 
 CTID="${CTID:-}"
-HOSTNAME="${HOSTNAME:-cobalt}"
+LXC_HOSTNAME="${LXC_HOSTNAME:-cobalt}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"
 ROOTFS_STORAGE="${ROOTFS_STORAGE:-local-lvm}"
 DISK_GB="${DISK_GB:-12}"
@@ -20,11 +23,40 @@ GATEWAY="${GATEWAY:-}"
 log() { printf '\n[cobalt-lxc] %s\n' "$*"; }
 die() { printf '\n[cobalt-lxc] ОШИБКА: %s\n' "$*" >&2; exit 1; }
 
+cleanup() {
+    [[ -z ${TEMP_BUNDLE} ]] || rm -rf -- "${TEMP_BUNDLE}"
+}
+trap cleanup EXIT
+
 [[ ${EUID} -eq 0 ]] || die "запустите скрипт от root на узле Proxmox VE"
 for command in pct pveam pvesh; do
     command -v "${command}" >/dev/null 2>&1 || die "${command} не найден; этот скрипт запускается только на Proxmox VE host"
 done
-[[ -f "${BUNDLE_DIR}/scripts/install.sh" ]] || die "запускайте скрипт из полного комплекта проекта"
+
+readonly BUNDLE_FILES=(compose.yaml Dockerfile.web nginx.conf cookies.example.json .env.example scripts/install.sh)
+
+bundle_is_complete() {
+    local file
+    for file in "${BUNDLE_FILES[@]}"; do
+        [[ -f "${BUNDLE_DIR}/${file}" ]] || return 1
+    done
+}
+
+download_bundle() {
+    command -v curl >/dev/null 2>&1 || die "для загрузки комплекта нужен curl"
+    TEMP_BUNDLE="$(mktemp -d)"
+    BUNDLE_DIR="${TEMP_BUNDLE}"
+    mkdir -p "${BUNDLE_DIR}/scripts"
+    local file
+    log "Локальный комплект не найден; загружаю файлы из ${RAW_BASE}"
+    for file in "${BUNDLE_FILES[@]}"; do
+        curl --proto '=https' --tlsv1.2 -fsSL "${RAW_BASE}/${file}" -o "${BUNDLE_DIR}/${file}" \
+            || die "не удалось скачать ${file}. Репозиторий должен быть публичным, а REPO_REF — существовать"
+    done
+    chmod 0755 "${BUNDLE_DIR}/scripts/install.sh"
+}
+
+bundle_is_complete || download_bundle
 
 if [[ -z ${CTID} ]]; then
     CTID="$(pvesh get /cluster/nextid)"
@@ -44,9 +76,9 @@ fi
 net0="name=eth0,bridge=${BRIDGE},ip=${IP_CONFIG}"
 [[ -n ${GATEWAY} ]] && net0+=",gw=${GATEWAY}"
 
-log "Создаю unprivileged LXC ${CTID} (${HOSTNAME})"
+log "Создаю unprivileged LXC ${CTID} (${LXC_HOSTNAME})"
 pct create "${CTID}" "${template_volume}" \
-    --hostname "${HOSTNAME}" \
+    --hostname "${LXC_HOSTNAME}" \
     --unprivileged 1 \
     --features nesting=1,keyctl=1 \
     --cores "${CORES}" \
