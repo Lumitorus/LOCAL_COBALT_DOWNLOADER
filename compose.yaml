@@ -1,0 +1,57 @@
+name: cobalt-local
+
+services:
+  cobalt-api:
+    image: ghcr.io/imputnet/cobalt:11
+    container_name: cobalt-api
+    init: true
+    read_only: true
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-9000}:9000/tcp"
+    environment:
+      API_URL: "${API_PUBLIC_URL:?Set API_PUBLIC_URL in .env}"
+      API_PORT: "9000"
+      CORS_WILDCARD: "1"
+      HTTP_PROXY: "${COBALT_HTTP_PROXY:-}"
+      HTTPS_PROXY: "${COBALT_HTTPS_PROXY:-}"
+      NO_PROXY: "${COBALT_NO_PROXY:-localhost,127.0.0.1,cobalt-api,cobalt-web}"
+      COOKIE_PATH: "/config/cookies.json"
+    volumes:
+      - ${COOKIE_FILE:-./cookies.example.json}:/config/cookies.json:ro
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  cobalt-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        COBALT_WEB_REF: "${COBALT_WEB_REF:-main}"
+        WEB_DEFAULT_API: "${API_PUBLIC_URL:?Set API_PUBLIC_URL in .env}"
+        WEB_HOST: "${WEB_HOST:-localhost}"
+    container_name: cobalt-web
+    read_only: true
+    restart: unless-stopped
+    depends_on:
+      cobalt-api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:8080/tcp"
+    tmpfs:
+      - /var/cache/nginx:size=16m
+      - /var/run:size=1m
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
