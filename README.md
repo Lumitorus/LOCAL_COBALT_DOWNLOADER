@@ -87,8 +87,6 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 
 > Запуск `curl | bash` удобен, но выполняет актуальный код ветки `main` с правами root. Перед запуском можно [открыть Linux-скрипт](https://github.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/blob/main/scripts/install.sh) или [Proxmox-скрипт](https://github.com/Lumitorus/LOCAL_COBALT_DOWNLOADER/blob/main/scripts/proxmox-lxc.sh) и проверить содержимое. Для воспроизводимой установки используйте URL конкретного commit вместо `main` и передайте такой же `REPO_REF`.
 
-Пока репозиторий приватный, GitHub вернёт `404` для этих raw-ссылок без авторизации. До публикации используйте локальный запуск из клонированного репозитория, описанный ниже.
-
 ## Быстрый запуск через Docker Compose
 
 1. Скопируйте файл окружения:
