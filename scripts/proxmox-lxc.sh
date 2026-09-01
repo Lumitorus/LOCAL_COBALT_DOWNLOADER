@@ -61,7 +61,44 @@ bundle_is_complete || download_bundle
 if [[ -z ${CTID} ]]; then
     CTID="$(pvesh get /cluster/nextid)"
 fi
-pct status "${CTID}" >/dev/null 2>&1 && die "контейнер CTID ${CTID} уже существует"
+
+if pct status "${CTID}" >/dev/null 2>&1; then
+    existing_config="$(pct config "${CTID}")"
+    existing_hostname="$(sed -n 's/^hostname: //p' <<<"${existing_config}" | tail -n 1)"
+    [[ ${existing_hostname} == "${LXC_HOSTNAME}" ]] \
+        || die "CTID ${CTID} занят контейнером ${existing_hostname:-без имени}; автоматическое удаление запрещено"
+
+    managed_container=false
+    if grep -Fq 'Managed by LOCAL_COBALT_DOWNLOADER' <<<"${existing_config}"; then
+        managed_container=true
+    else
+        was_running=false
+        [[ $(pct status "${CTID}" | awk '{print $2}') == running ]] && was_running=true
+        if [[ ${was_running} == false ]]; then
+            log "Запускаю существующий LXC ${CTID} для проверки установленного Cobalt"
+            pct start "${CTID}"
+        fi
+
+        for _ in $(seq 1 30); do
+            if pct exec "${CTID}" -- test -f /opt/cobalt-local/compose.yaml 2>/dev/null; then
+                managed_container=true
+                break
+            fi
+            sleep 1
+        done
+
+        if [[ ${managed_container} == false ]]; then
+            [[ ${was_running} == true ]] || pct stop "${CTID}"
+            die "LXC ${CTID} не содержит /opt/cobalt-local/compose.yaml; автоматическое удаление запрещено"
+        fi
+    fi
+
+    log "Существующий LXC ${CTID} проверен; останавливаю и удаляю его перед чистой установкой"
+    if [[ $(pct status "${CTID}" | awk '{print $2}') == running ]]; then
+        pct shutdown "${CTID}" --timeout 30 || pct stop "${CTID}"
+    fi
+    pct destroy "${CTID}" --purge 1
+fi
 
 log "Обновляю список LXC-шаблонов"
 pveam update
@@ -79,6 +116,7 @@ net0="name=eth0,bridge=${BRIDGE},ip=${IP_CONFIG}"
 log "Создаю unprivileged LXC ${CTID} (${LXC_HOSTNAME})"
 pct create "${CTID}" "${template_volume}" \
     --hostname "${LXC_HOSTNAME}" \
+    --description "Managed by LOCAL_COBALT_DOWNLOADER" \
     --unprivileged 1 \
     --features nesting=1,keyctl=1 \
     --cores "${CORES}" \

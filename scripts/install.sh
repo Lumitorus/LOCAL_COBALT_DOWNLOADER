@@ -75,8 +75,12 @@ for file in "${BUNDLE_FILES[@]}"; do
 done
 
 if [[ ! -f "${INSTALL_DIR}/cookies.json" ]]; then
-    install -m 0600 "${INSTALL_DIR}/cookies.example.json" "${INSTALL_DIR}/cookies.json"
+    install -m 0640 -o root -g 1000 "${INSTALL_DIR}/cookies.example.json" "${INSTALL_DIR}/cookies.json"
 fi
+
+# The official Cobalt image runs as uid/gid 1000 and must be able to read the bind mount.
+chown root:1000 "${INSTALL_DIR}/cookies.json"
+chmod 0640 "${INSTALL_DIR}/cookies.json"
 
 primary_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 primary_ip="${primary_ip:-127.0.0.1}"
@@ -106,10 +110,28 @@ cd "${INSTALL_DIR}"
 log "Проверяю Compose-конфигурацию"
 docker compose config --quiet
 
+existing_install=false
+for container in cobalt-api cobalt-web; do
+    if docker container inspect "${container}" >/dev/null 2>&1; then
+        compose_project="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "${container}" 2>/dev/null || true)"
+        if [[ ${compose_project} != cobalt-local ]]; then
+            die "контейнер ${container} уже существует, но не принадлежит проекту cobalt-local. Удалите или переименуйте его вручную"
+        fi
+        existing_install=true
+    fi
+done
+
 log "Загружаю API и собираю локальный web-интерфейс (первый запуск может занять несколько минут)"
 docker compose pull cobalt-api
 docker compose build --pull cobalt-web
-docker compose up -d
+
+if [[ ${existing_install} == true ]]; then
+    log "Обнаружена существующая установка cobalt-local; удаляю старые контейнеры и создаю их заново"
+    docker compose down --remove-orphans
+    docker compose up -d --force-recreate --remove-orphans
+else
+    docker compose up -d
+fi
 
 log "Ожидаю готовности сервисов"
 deadline=$((SECONDS + 180))
@@ -137,6 +159,7 @@ API:           ${api_url}
 Статус:        cd ${INSTALL_DIR} && docker compose ps
 Логи:          cd ${INSTALL_DIR} && docker compose logs -f
 Обновление:    cd ${INSTALL_DIR} && docker compose pull cobalt-api && docker compose build --pull --no-cache cobalt-web && docker compose up -d
+Переустановка: повторно запустите этот установочный скрипт
 Остановка:     cd ${INSTALL_DIR} && docker compose down
 ============================================================
 EOF
